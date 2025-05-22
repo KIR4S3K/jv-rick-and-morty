@@ -3,31 +3,42 @@ package mate.academy.rickandmorty.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
+import java.net.URI;
 import mate.academy.rickandmorty.entity.CharacterEntity;
 import mate.academy.rickandmorty.repository.CharacterRepository;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
 @Component
+@ConditionalOnProperty(
+        name = "data.loader.enabled",
+        havingValue = "true",
+        matchIfMissing = true
+)
 public class DataLoader {
     private final CharacterRepository repository;
     private final WebClient webClient;
     private final ObjectMapper mapper = new ObjectMapper();
 
-    @Autowired
     public DataLoader(CharacterRepository repository) {
         this.repository = repository;
-        this.webClient = WebClient.create("https://rickandmortyapi.com/api/character");
+        this.webClient = WebClient.builder()
+                .baseUrl("https://rickandmortyapi.com")
+                .build();
     }
 
     @PostConstruct
     public void loadData() {
         repository.deleteAll();
-        String url = "/";
+
+        String nextUrl = "/api/character";
+
         do {
-            JsonNode root = webClient.get()
-                    .uri(url)
+            JsonNode root = (nextUrl.startsWith("http")
+                    ? webClient.get().uri(URI.create(nextUrl))
+                    : webClient.get().uri(nextUrl)
+            )
                     .retrieve()
                     .bodyToMono(JsonNode.class)
                     .block();
@@ -40,7 +51,10 @@ public class DataLoader {
                 entity.setGender(chr.get("gender").asText());
                 repository.save(entity);
             }
-            url = root.get("info").get("next").asText(null);
-        } while (url != null && !url.isEmpty());
+
+            String candidate = root.get("info").get("next").asText(null);
+            nextUrl = (candidate != null && !candidate.isEmpty()) ? candidate : null;
+
+        } while (nextUrl != null);
     }
 }
